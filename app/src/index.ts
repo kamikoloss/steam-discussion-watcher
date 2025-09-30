@@ -110,6 +110,7 @@ function extractPostCount(html: string): number | null {
     /<span[^>]*class="commentthread_count_label"[^>]*>\s*([\d,.]+)\s*<\/span>/i,
     /"comment_count"\s*:\s*(\d+)/i,
     /"num_comments"\s*:\s*(\d+)/i,
+    /"total_count"\s*:\s*(\d+)/i,
     /data-tooltip-content="[^"]*?([\d,.]+)\s*(?:comments|件のコメント)/i,
   ];
 

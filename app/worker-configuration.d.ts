@@ -6,8 +6,8 @@ declare namespace Cloudflare {
 		mainModule: typeof import("./src/index");
 	}
         interface Env {
-                STEAM_DISCUSSION_COUNTS: KVNamespace;
                 STEAM_THREAD_URLS?: string;
+                DISCORD_WEBHOOK_URL?: string;
         }
 }
 interface Env extends Cloudflare.Env {}

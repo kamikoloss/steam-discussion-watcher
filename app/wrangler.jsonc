@@ -14,14 +14,9 @@
                 "crons": ["0 * * * *"]
         },
         "vars": {
-                "STEAM_THREAD_URLS": "[]"
-        },
-        "kv_namespaces": [
-                {
-                        "binding": "STEAM_DISCUSSION_COUNTS",
-                        "id": "steam-discussion-counts"
-                }
-        ]
+                "STEAM_THREAD_URLS": "[]",
+                "DISCORD_WEBHOOK_URL": ""
+        }
         /**
          * Smart Placement
          * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

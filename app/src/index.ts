@@ -12,12 +12,14 @@
  */
 
 const THREAD_URLS_VARIABLE = 'STEAM_THREAD_URLS';
-const KV_KEY_PREFIX = 'thread:';
+const DISCORD_WEBHOOK_URL_VARIABLE = 'DISCORD_WEBHOOK_URL';
 
 type WorkerEnv = Env & {
-  STEAM_DISCUSSION_COUNTS: KVNamespace;
   STEAM_THREAD_URLS?: string;
+  DISCORD_WEBHOOK_URL?: string;
 };
+
+const lastKnownCounts = new Map<string, number>();
 
 export default {
   async fetch(): Promise<Response> {
@@ -27,13 +29,19 @@ export default {
   async scheduled(_event, env, ctx): Promise<void> {
     const workerEnv = env as WorkerEnv;
     const urls = parseThreadUrls(workerEnv[THREAD_URLS_VARIABLE]);
+    const webhookUrl = workerEnv[DISCORD_WEBHOOK_URL_VARIABLE];
 
     if (urls.length === 0) {
       console.warn('No Steam thread URLs configured. Skipping scheduled run.');
       return;
     }
 
-    const tasks = urls.map((url) => handleThread(url, workerEnv));
+    if (!webhookUrl) {
+      console.warn('No Discord webhook URL configured. Skipping scheduled run.');
+      return;
+    }
+
+    const tasks = urls.map((url) => handleThread(url, webhookUrl));
     for (const task of tasks) {
       ctx.waitUntil(task);
     }
@@ -41,23 +49,41 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function handleThread(url: string, env: WorkerEnv): Promise<void> {
+async function handleThread(url: string, webhookUrl: string): Promise<void> {
   try {
-    const reviewCount = await fetchReviewCount(url);
-    const key = KV_KEY_PREFIX + encodeURIComponent(url);
-    const record = {
-      url,
-      reviewCount,
-      fetchedAt: new Date().toISOString(),
-    } satisfies ThreadRecord;
-    await env.STEAM_DISCUSSION_COUNTS.put(key, JSON.stringify(record));
-    console.log(`Stored review count for ${url}: ${reviewCount}`);
+    const postCount = await fetchPostCount(url);
+    const previousCount = lastKnownCounts.get(url);
+
+    if (typeof previousCount !== 'number') {
+      lastKnownCounts.set(url, postCount);
+      console.log(`Stored initial post count for ${url}: ${postCount}`);
+      return;
+    }
+
+    if (postCount > previousCount) {
+      const difference = postCount - previousCount;
+      const formattedDifference = new Intl.NumberFormat('ja-JP').format(difference);
+      const formattedTotal = new Intl.NumberFormat('ja-JP').format(postCount);
+      await notifyDiscord(webhookUrl, {
+        content: `📢 新しい書き込みがありました (+${formattedDifference} 件 / 合計 ${formattedTotal} 件)\n${url}`,
+      });
+      console.log(`Notified Discord about ${difference} new posts for ${url}.`);
+    } else if (postCount < previousCount) {
+      console.warn(
+        `Detected a decrease in post count for ${url} (was ${previousCount}, now ${postCount}).`,
+      );
+    } else {
+      console.log(`No new posts detected for ${url}.`);
+    }
+
+    lastKnownCounts.set(url, postCount);
+    console.log(`Updated post count for ${url}: ${postCount}`);
   } catch (error) {
     console.error(`Failed to process ${url}:`, error);
   }
 }
 
-async function fetchReviewCount(url: string): Promise<number> {
+async function fetchPostCount(url: string): Promise<number> {
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'steam-discussion-watcher/1.0 (+https://workers.cloudflare.com/)',
@@ -70,16 +96,16 @@ async function fetchReviewCount(url: string): Promise<number> {
   }
 
   const body = await response.text();
-  const count = extractReviewCount(body);
+  const count = extractPostCount(body);
 
   if (count === null) {
-    throw new Error('Unable to locate review count in thread HTML.');
+    throw new Error('Unable to locate post count in thread HTML.');
   }
 
   return count;
 }
 
-function extractReviewCount(html: string): number | null {
+function extractPostCount(html: string): number | null {
   const patterns = [
     /<span[^>]*class="commentthread_count_label"[^>]*>\s*([\d,.]+)\s*<\/span>/i,
     /"comment_count"\s*:\s*(\d+)/i,
@@ -120,8 +146,27 @@ function parseThreadUrls(raw: string | undefined): string[] {
     .filter((value) => value.length > 0);
 }
 
-interface ThreadRecord {
-  url: string;
-  reviewCount: number;
-  fetchedAt: string;
+interface DiscordWebhookPayload {
+  content?: string;
+  username?: string;
+  embeds?: unknown[];
+}
+
+async function notifyDiscord(webhookUrl: string, payload: DiscordWebhookPayload): Promise<void> {
+  if (!payload.content && (!payload.embeds || payload.embeds.length === 0)) {
+    throw new Error('Discord webhook payload must include content or embeds.');
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '<failed to read response body>');
+    throw new Error(`Failed to send Discord notification (${response.status} ${response.statusText}): ${errorText}`);
+  }
 }

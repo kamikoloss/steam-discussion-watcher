@@ -5,8 +5,10 @@ declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
 	}
-	interface Env {
-	}
+        interface Env {
+                STEAM_THREAD_URLS?: string;
+                DISCORD_WEBHOOK_URL?: string;
+        }
 }
 interface Env extends Cloudflare.Env {}
 
